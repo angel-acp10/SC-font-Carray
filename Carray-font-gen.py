@@ -2,15 +2,26 @@ import freetype
 import math
 import unicodedata
 
+class FontMetadata(object):
+    def __init__(self, input_file):
+        raw_rg_s, raw_rg_e, raw_str = self.ReadInputFile(self, input_file)
+        self.rg_start, self.rg_end = self.SortRanges(raw_rg_s, raw_rg_e, raw_str)
+        self.line_height, self.max_ascent = self.CompFontMetrics(self)
 
-class InputFile(object):
-    def __init__(self, file_name):
-        self.file_name = file_name
+    @staticmethod
+    def ReadInputFile(self, inp_file):
+        ''' 
+        Reads 'input.txt' file to get the user introduced id. This id will 
+        be used to store variable names of the output files.
 
-    def GetFontParam(self):
-        ''' Reads 'input-txt' file to get the user introduced id. This id will 
-            be used to store variable names of the output files.'''
-        f = open(self.file_name, "r")
+        Reads 'input.txt' file to get the user introduced ranges as well as
+        individual characters. Ranges are stored in 'range start' and 
+        'range_end'. Individual characters are saved in 'string'.
+        '''
+        range_start, range_end = [], []
+        string = ''
+
+        f = open(inp_file, "r")
         line = f.readline()
         while line:
             line = line.strip()
@@ -22,38 +33,18 @@ class InputFile(object):
             line = line.replace('\t', '')
             if line.find('<id>=')!=-1:
                 line = line.replace('<id>=','')
-                id = line
+                self.id = line
 
             elif line.find('<file>=')!=-1:
                 line = line.replace('<file>=','')
-                font_file = line 
+                self.font_file = line 
             
             elif line.find('<size>=')!=-1:
                 line = line.replace('<size>=','')
-                font_size = int(line)
+                self.font_size = int(line)
 
-            line = f.readline()
-        f.close()
-
-        return(id, font_file, font_size)
-
-    def GetUnicodeRanges(self):
-        ''' Reads 'input.txt' file to get the user introduced ranges as well as
-             individual characters. Ranges are stored in 'range start' and 
-             'range_end'. Individual characters are saved in 'string'. '''
-        range_start, range_end = [], []
-        string = ''
-        f = open(self.file_name, "r")
-        line = f.readline()
-        while line:
-            line = line.strip()
-            if line=='' or line[0]=='#':
-                line = f.readline()
-                continue
-            line = line.replace(' ','')
-            line = line.replace('\t', '')
             #range format example could be '[0x0120,0x3A3]' (without '')
-            if line[0]=='[' and line[-1]==']' and line.find(',')!=-1: 
+            elif line[0]=='[' and line[-1]==']' and line.find(',')!=-1: 
                 line = line.strip('[')
                 line = line.strip(']')
                 rg = line.split(',',1)
@@ -64,24 +55,29 @@ class InputFile(object):
             #string format example could be '"abcfu/*iyker"' (without '')
             elif line[0]=='"' and line[-1]=='"':
                 string += line.strip('"')
-            
+
             line = f.readline()
         f.close()
+
+        return(range_start, range_end, string)
+
+    @staticmethod
+    def SortRanges(raw_rg_s, raw_rg_e, raw_str):
 
         #once we have 'range_start', 'range_end' and 'string', let's include all
         #unicode codes into buff_list
         buff_list = []
         
         #include ranges
-        for start, end in zip(range_start, range_end):
-            for uc_index in range(start,end+1):
-                buff_list.append(uc_index)
+        for s, e in zip(raw_rg_s, raw_rg_e):
+            for uc_idx in range(s,e+1):
+                buff_list.append(uc_idx)
         
         #and the strings
-        for char in string:
+        for char in raw_str:
             buff_list.append(ord(char))
 
-        #remove duplicates codes
+        #remove duplicates unicode indexes
         buff_list = list(set(buff_list)) 
         
         #sorts the list
@@ -99,10 +95,33 @@ class InputFile(object):
         
         return(out_rg_start, out_rg_end)
 
+    def GetFullStr(self):
+        #put all characters in a single string
+        char_buf = ''
+        for s,e in zip(range(len(self.rg_start)), range(len(self.rg_end))):
+            for c in range(self.rg_start[s], self.rg_end[e]+1):
+                char_buf += chr(c) 
+        
+        return(char_buf)
+
+    @staticmethod
+    def CompFontMetrics(self):
+
+        char_buf = self.GetFullStr()
+
+        #compute max key metrics of the font
+        font = Font(self.font_file, self.font_size)
+        line_height, max_ascent = font.max_font_metrics(char_buf)
+
+        self.line_gap = 2
+
+        return(line_height, max_ascent)
+
+
 
 class Font(object):
-    def __init__(self, filename, size):
-        self.face = freetype.Face(filename)
+    def __init__(self, font_file, size):
+        self.face = freetype.Face(font_file)
         self.face.set_pixel_sizes(0, size)
 
     def char_metrics(self, char):
@@ -135,67 +154,48 @@ class CharMetadata:
         self.height = height
         self.y_offset = y_offset
         self.map_idx = map_idx
+
+
+class GenerateOutputFile(object):
+    def __init__(self, input_file):
+        font_info = FontMetadata(input_file)
+        font = Font(font_info.font_file, font_info.font_size)
+        self.WriteSrc(font, font_info)
     
-class FontMetadata:
-    def __init__(self, line_height, line_gap):
-        self.line_height = line_height
-        self.line_gap = line_gap
-
-class OutputFile(object):
-    def __init__(self, id):
-        self.id = id
-        #self.uc_ranges = ranges
-
-
-
-              
-if __name__ == '__main__':
-    #get parameters from 'input.txt' file
-    input = InputFile('input.txt')
-    id, font_file, font_size = input.GetFontParam()
-    range_start, range_end = input.GetUnicodeRanges()
-
-    #put all characters in a single string
-    char_buf = ''
-    for s,e in zip(range(len(range_start)), range(len(range_end))):
-        for c in range(range_start[s],range_end[e]+1):
-            char_buf += chr(c) 
-
-    #compute max key metrics of the font
-    font = Font(font_file, font_size)
-    line_height, max_ascent = font.max_font_metrics(char_buf)
-    
-    #fill the font metadata
-    font_info = FontMetadata(line_height,2)
-    
-    f = open('output.c', "w+")
+    def WriteSrc(self, font, font_info):
+        f = open('output.c', "w+")
  
-    f.write("static const uint8_t glyph_bitmap[] = {\r\n")
+        f.write("static const uint8_t glyph_bitmap[] = {\r\n")
 
-    #fill the char metadata
-    char_info = []
-    byte_idx = 0
-    for c in char_buf:
-        bitmap = font.get_bitmap(c)
+        char_buf = font_info.GetFullStr()
 
-        ascent, descent = font.char_metrics(c)
-        y_offset = max_ascent - ascent
-        char_info.append( CharMetadata(bitmap.width, bitmap.rows, y_offset, byte_idx) )
+        #fill the char metadata
+        char_info = []
+        byte_idx = 0
+        for c in char_buf:
+            bitmap = font.get_bitmap(c)
 
-        width_bytes = math.ceil(bitmap.width/8) # in bytes
-        f.write( '// "' + c + '"\r\n')
-        for y in range(bitmap.rows):
-            f.write('\t')
-            for x in range(width_bytes):
-                byte = bitmap.buffer[y*bitmap.pitch + x] #bitmap.pitch is the number of bytes per row used in the buffer
-                print( format( byte, '#010b')+', ', end = '' )
-                f.write( format( byte, '#010b')+', ' )
-                byte_idx += 1
+            ascent, descent = font.char_metrics(c)
+            y_offset = font_info.max_ascent - ascent
+            char_info.append( CharMetadata(bitmap.width, bitmap.rows, y_offset, byte_idx) )
+
+            width_bytes = math.ceil(bitmap.width/8) # in bytes
+            f.write( '// "' + c + '"\r\n')
+            for y in range(bitmap.rows):
+                f.write('\t')
+                for x in range(width_bytes):
+                    byte = bitmap.buffer[y*bitmap.pitch + x] #bitmap.pitch is the number of bytes per row used in the buffer
+                    print( format( byte, '#010b')+', ', end = '' )
+                    f.write( format( byte, '#010b')+', ' )
+                    byte_idx += 1
+                print('\n', end = '' )
+                f.write('\r\n')
             print('\n', end = '' )
             f.write('\r\n')
-        print('\n', end = '' )
-        f.write('\r\n')
 
-    f.write("}")
+        f.write("}")
+        
+              
+if __name__ == '__main__':
 
-
+    output = GenerateOutputFile('input.txt')
