@@ -1,5 +1,8 @@
-[0x03A9, 0x03C8]
-[0x25B2, 0x25F4]
-"e%&"
-[0x35B2, 0x35F4]
-"askgfhjasñik"
+
+<id> = helvetica_12
+
+<file> = helvetica.ttf
+
+<size> = 30
+
+"q1zaw2xs3cedvfr4bt5g6yhn7mju8ki,.l9o0-ñpç````´´'!"·$%&/()=?¿ "
