@@ -5,7 +5,7 @@ import unicodedata
 class FontMetadata(object):
     def __init__(self, input_file):
         raw_rg_s, raw_rg_e, raw_str = self.ReadInputFile(self, input_file)
-        self.rg_start, self.rg_end = self.SortRanges(raw_rg_s, raw_rg_e, raw_str)
+        self.rg_start, self.rg_end, self.rg_ch_info_idx = self.SortRanges(raw_rg_s, raw_rg_e, raw_str)
         self.line_height, self.max_ascent = self.CompFontMetrics(self)
 
     @staticmethod
@@ -84,16 +84,18 @@ class FontMetadata(object):
         buff_list.sort() 
 
         #sweep the entire buffer and find all its new ranges
-        out_rg_start = [buff_list[0]]
-        out_rg_end = [buff_list[0]]
+        rg_start = [buff_list[0]]
+        rg_end = [buff_list[0]]
+        rg_ch_info_idx = [0]
         for i in range(len(buff_list)-1):
             if buff_list[i]+1 == buff_list[i+1]:
-                out_rg_end[-1] += 1
+                rg_end[-1] += 1
             else:
-                out_rg_start.append(buff_list[i+1])
-                out_rg_end.append(buff_list[i+1])
+                rg_start.append(buff_list[i+1])
+                rg_end.append(buff_list[i+1])
+                rg_ch_info_idx.append(i+1)
         
-        return(out_rg_start, out_rg_end)
+        return(rg_start, rg_end, rg_ch_info_idx)
 
     def GetFullStr(self):
         #put all characters in a single string
@@ -149,27 +151,39 @@ class Font(object):
         return(self.face.glyph.bitmap)
 
 class CharMetadata:
-    def __init__(self, width, height, y_offset, map_idx):
+    def __init__(self, ch, width, height, y_offset, bitmap_idx):
+        self.ch = ch
         self.width = width
         self.height = height
         self.y_offset = y_offset
-        self.map_idx = map_idx
+        self.bitmap_idx = bitmap_idx
+
+def GetMapIdx(unicode_idx, char_info_list):
+    for c in char_info_list:
+        if unicode_idx == c.unicode_idx:
+            return c.map_idx
 
 
 class GenerateOutputFile(object):
     def __init__(self, input_file):
         font_info = FontMetadata(input_file)
         font = Font(font_info.font_file, font_info.font_size)
+
+        self.c_file = font_info.id + '.c'
+        self.h_file = font_info.id + '.h'
         self.WriteSrc(font, font_info)
     
     def WriteSrc(self, font, font_info):
-        f = open('output.c', "w+")
+        f = open(self.c_file, "w+")
+
+        f.write('#include <stdint.h>\r\n')
+        f.write('#include "' + self.h_file + '"\r\n')
  
-        f.write("static const uint8_t glyph_bitmap[] = {\r\n")
+        f.write("static const uint8_t bitmap[] = {\r\n")
 
         char_buf = font_info.GetFullStr()
 
-        #fill the char metadata
+        #write bitmap into c file and save char metadata 
         char_info = []
         byte_idx = 0
         for c in char_buf:
@@ -177,10 +191,13 @@ class GenerateOutputFile(object):
 
             ascent, descent = font.char_metrics(c)
             y_offset = font_info.max_ascent - ascent
-            char_info.append( CharMetadata(bitmap.width, bitmap.rows, y_offset, byte_idx) )
+            char_info.append( CharMetadata( c, bitmap.width, bitmap.rows, y_offset, byte_idx) )
 
             width_bytes = math.ceil(bitmap.width/8) # in bytes
-            f.write( '// "' + c + '"\r\n')
+            if c == '"':
+                f.write( '\t// "\\' + c + '" ' + "U+{:04x}".format(ord(c))  + '\r\n')
+            else:
+                f.write( '\t// "' + c + '" ' + "U+{:04x}".format(ord(c))  + '\r\n')
             for y in range(bitmap.rows):
                 f.write('\t')
                 for x in range(width_bytes):
@@ -192,8 +209,29 @@ class GenerateOutputFile(object):
                 f.write('\r\n')
             print('\n', end = '' )
             f.write('\r\n')
+        f.write("};\r\n\r\n")
 
-        f.write("}")
+        #print char metadata into c file
+        f.write('static const char_info_t char_info[] = {\r\n')
+        for c in char_info:
+            f.write('\t{.bitmap_idx = ' + str(c.bitmap_idx))
+            f.write('\t.y_offset = ' + str(c.y_offset))
+            f.write('\t.w = ' + str(c.width))
+            f.write('\t.h = ' + str(c.height) +'},')
+            if c == '"':
+                f.write( '\t// "\\' + c.ch + '" ' + "U+{:04x}".format(ord(c.ch))  + '\r\n')
+            else:
+                f.write( '\t// "' + c.ch + '" ' + "U+{:04x}".format(ord(c.ch))  + '\r\n')
+        f.write('};\r\n')
+
+        #print font data into c file
+        f.write('static const range_index_t range_index[] = {\r\n')
+        for s, e, ci_idx in zip(font_info.rg_start, font_info.rg_end, font_info.rg_ch_info_idx):
+            f.write('\t{.start = ' + str(s))
+            f.write('\t.end = ' + str(e))
+            f.write('\t.ch_info_idx = ' + str(ci_idx) + '},')
+            f.write('\t// [' + "U+{:04x}".format(s) + ' - ' + "U+{:04x}".format(e) + ']\r\n')
+        f.write('};\r\n')
         
               
 if __name__ == '__main__':

@@ -5,4 +5,5 @@
 
 <size> = 30
 
-"q1zaw2xs3cedvfr4bt5g6yhn7mju8ki,.l9o0-ñpç````´´'!"·$%&/()=?¿ "
+[0x0020,0x007e]
+[0x00A0,0x00FF]
